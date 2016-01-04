@@ -21,6 +21,7 @@
 #include "common/collection.h"
 #include "common/colorspaces.h"
 #include "views/view.h"
+#include "views/undo.h"
 #include "develop/develop.h"
 #include "control/jobs.h"
 #include "control/control.h"
@@ -80,6 +81,7 @@ static void _update_softproof_gamut_checking(dt_develop_t *d);
 
 /* signal handler for filmstrip image switching */
 static void _view_darkroom_filmstrip_activate_callback(gpointer instance, gpointer user_data);
+
 
 const char *name(dt_view_t *self)
 {
@@ -415,7 +417,6 @@ void expose(
   }
 }
 
-
 void reset(dt_view_t *self)
 {
   dt_control_set_dev_zoom(DT_ZOOM_FIT);
@@ -725,6 +726,8 @@ static void film_strip_activated(const int imgid, void *data)
   dt_view_lighttable_set_position(darktable.view_manager, dt_collection_image_offset(imgid));
   // force redraw
   dt_control_queue_redraw();
+  // clean the undo list
+  dt_undo_clear(darktable.undo, DT_UNDO_HISTORY);
 }
 
 static void _view_darkroom_filmstrip_activate_callback(gpointer instance, gpointer user_data)
@@ -2221,6 +2224,21 @@ void init_key_accels(dt_view_t *self)
 
   // fullscreen view
   dt_accel_register_view(self, NC_("accel", "full preview"), GDK_KEY_z, 0);
+
+  // undo/redo
+  dt_accel_register_view(self, NC_("accel", "undo"), GDK_KEY_z, GDK_CONTROL_MASK);
+  dt_accel_register_view(self, NC_("accel", "redo"), GDK_KEY_r, GDK_CONTROL_MASK);
+
+}
+
+static gboolean _darkroom_undo_callback(GtkAccelGroup *accel_group, GObject *acceleratable, guint keyval,
+                                        GdkModifierType modifier, gpointer data)
+{
+  if(keyval == GDK_KEY_z)
+    dt_undo_do_undo(darktable.undo, DT_UNDO_HISTORY);
+  else
+    dt_undo_do_redo(darktable.undo, DT_UNDO_HISTORY);
+  return TRUE;
 }
 
 void connect_key_accels(dt_view_t *self)
@@ -2282,6 +2300,11 @@ void connect_key_accels(dt_view_t *self)
   dt_accel_connect_view(self, "increase brush opacity", closure);
   closure = g_cclosure_new(G_CALLBACK(_brush_opacity_down_callback), (gpointer)self->data, NULL);
   dt_accel_connect_view(self, "decrease brush opacity", closure);
+
+  // undo/redo
+  closure = g_cclosure_new(G_CALLBACK(_darkroom_undo_callback), (gpointer)self, NULL);
+  dt_accel_connect_view(self, "undo", closure);
+  dt_accel_connect_view(self, "redo", closure);
 }
 
 // modelines: These editor modelines have been set for all relevant files by tools/update_modelines.sh
