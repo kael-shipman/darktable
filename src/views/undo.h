@@ -52,7 +52,8 @@ void dt_undo_cleanup(dt_undo_t *self);
 
 // record a change that will be insered into the undo list
 void dt_undo_record(dt_undo_t *self, dt_view_t *view, dt_undo_type_t type, dt_undo_data_t *data,
-                    void (*undo)(dt_view_t *view, dt_undo_type_t type, dt_undo_data_t *item));
+                    void (*undo)(dt_view_t *view, dt_undo_type_t type, dt_undo_data_t *item),
+                    void (*free_data)(dt_undo_data_t *data));
 
 //  undo an element which correspond to filter. filter here is expected to be
 //  a set of dt_undo_type_t.

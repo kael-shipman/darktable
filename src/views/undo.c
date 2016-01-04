@@ -26,6 +26,7 @@ typedef struct dt_undo_item_t
   dt_undo_type_t type;
   dt_undo_data_t *data;
   void (*undo)(dt_view_t *view, dt_undo_type_t type, dt_undo_data_t *data);
+  void (*free_data)(dt_undo_data_t *data);
 } dt_undo_item_t;
 
 dt_undo_t *dt_undo_init(void)
@@ -43,21 +44,30 @@ void dt_undo_cleanup(dt_undo_t *self)
   dt_pthread_mutex_destroy(&self->mutex);
 }
 
+static void _free_undo_data(void *p)
+{
+  dt_undo_item_t *item = (dt_undo_item_t *)p;
+  if (item->free_data) item->free_data(item->data);
+  g_free(item->data);
+}
+
 void dt_undo_record(dt_undo_t *self, dt_view_t *view, dt_undo_type_t type, dt_undo_data_t *data,
-                    void (*undo)(dt_view_t *view, dt_undo_type_t type, dt_undo_data_t *item))
+                    void (*undo)(dt_view_t *view, dt_undo_type_t type, dt_undo_data_t *item),
+                    void (*free_data)(dt_undo_data_t *data))
 {
   dt_undo_item_t *item = g_malloc(sizeof(dt_undo_item_t));
 
-  item->view = view;
-  item->type = type;
-  item->data = data;
-  item->undo = undo;
+  item->view      = view;
+  item->type      = type;
+  item->data      = data;
+  item->undo      = undo;
+  item->free_data = free_data;
 
   dt_pthread_mutex_lock(&self->mutex);
   self->undo_list = g_list_prepend(self->undo_list, (gpointer)item);
 
   // recording an undo data invalidate all the redo
-  g_list_free_full(self->redo_list, &g_free);
+  g_list_free_full(self->redo_list, _free_undo_data);
   self->redo_list = NULL;
   dt_pthread_mutex_unlock(&self->mutex);
 }
@@ -130,7 +140,7 @@ static void dt_undo_clear_list(GList **list, uint32_t filter)
     if(item->type & filter)
     {
       //  remove this element
-      g_free(item->data);
+      _free_undo_data((void *)item);
       *list = g_list_remove(*list, item);
     }
     l = next;
