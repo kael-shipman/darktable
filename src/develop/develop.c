@@ -134,9 +134,7 @@ void dt_dev_cleanup(dt_develop_t *dev)
   }
   while(dev->history)
   {
-    free(((dt_dev_history_item_t *)dev->history->data)->params);
-    free(((dt_dev_history_item_t *)dev->history->data)->blend_params);
-    free((dt_dev_history_item_t *)dev->history->data);
+    dt_dev_free_history_item(((dt_dev_history_item_t *)dev->history->data));
     dev->history = g_list_delete_link(dev->history, dev->history);
   }
   while(dev->iop)
@@ -561,9 +559,7 @@ void dt_dev_add_history_item(dt_develop_t *dev, dt_iop_module_t *module, gboolea
       GList *next = g_list_next(history);
       dt_dev_history_item_t *hist = (dt_dev_history_item_t *)(history->data);
       // printf("removing obsoleted history item: %s\n", hist->module->op);
-      free(hist->params);
-      free(hist->blend_params);
-      free(history->data);
+      dt_dev_free_history_item(hist);
       dev->history = g_list_delete_link(dev->history, history);
       history = next;
     }
@@ -684,9 +680,7 @@ void dt_dev_reload_history_items(dt_develop_t *dev)
   {
     GList *next = g_list_next(history);
     dt_dev_history_item_t *hist = (dt_dev_history_item_t *)(history->data);
-    free(hist->params);
-    free(hist->blend_params);
-    free(history->data);
+    dt_dev_free_history_item(hist);
     dev->history = g_list_delete_link(dev->history, history);
     history = next;
   }
@@ -1114,8 +1108,6 @@ void dt_dev_read_history(dt_develop_t *dev)
          || hist->module->legacy_params(hist->module, sqlite3_column_blob(stmt, 4), labs(modversion),
                                         hist->params, labs(hist->module->version())))
       {
-        free(hist->params);
-        free(hist->blend_params);
         fprintf(stderr, "[dev_read_history] module `%s' version mismatch: history is %d, dt %d.\n",
                 hist->module->op, modversion, hist->module->version());
         const char *fname = dev->image_storage.filename + strlen(dev->image_storage.filename);
@@ -1123,7 +1115,7 @@ void dt_dev_read_history(dt_develop_t *dev)
         if(fname > dev->image_storage.filename) fname++;
         dt_control_log(_("%s: module `%s' version mismatch: %d != %d"), fname, hist->module->op,
                        hist->module->version(), modversion);
-        free(hist);
+        dt_dev_free_history_item(hist);
         continue;
       }
       else
@@ -1571,9 +1563,7 @@ void dt_dev_module_remove(dt_develop_t *dev, dt_iop_module_t *module)
       {
         // printf("removing obsoleted history item: %s %s %p %p\n", hist->module->op, hist->module->multi_name,
         //        module, hist->module);
-        free(hist->params);
-        free(hist->blend_params);
-        free(hist);
+        dt_dev_free_history_item(hist);
         dev->history = g_list_delete_link(dev->history, elem);
         dev->history_end--;
         del = 1;
