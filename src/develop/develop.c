@@ -667,6 +667,13 @@ void dt_dev_add_history_item(dt_develop_t *dev, dt_iop_module_t *module, gboolea
   }
 }
 
+void dt_dev_free_history_item(dt_dev_history_item_t *item)
+{
+  free(item->params);
+  free(item->blend_params);
+  free(item);
+}
+
 void dt_dev_reload_history_items(dt_develop_t *dev)
 {
   dev->focus_hash = 0;

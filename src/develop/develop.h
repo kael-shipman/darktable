@@ -222,6 +222,7 @@ void dt_dev_reload_history_items(dt_develop_t *dev);
 void dt_dev_pop_history_items(dt_develop_t *dev, int32_t cnt);
 void dt_dev_write_history(dt_develop_t *dev);
 void dt_dev_read_history(dt_develop_t *dev);
+void dt_dev_free_history_item(dt_dev_history_item_t *item);
 
 void dt_dev_invalidate(dt_develop_t *dev);
 // also invalidates preview (which is unaffected by resize/zoom/pan)
