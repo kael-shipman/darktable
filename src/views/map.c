@@ -867,7 +867,7 @@ static void pop_undo(dt_view_t *self, dt_undo_type_t type, dt_undo_data_t *data)
 
 static void _push_position(dt_view_t *self, int imgid, float longitude, float latitude)
 {
-  dt_undo_geotag_t *geotag = g_malloc(sizeof(dt_undo_geotag_t));
+  dt_undo_geotag_t *geotag = malloc(sizeof(dt_undo_geotag_t));
 
   geotag->imgid = imgid;
   geotag->longitude = longitude;
