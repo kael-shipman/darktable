@@ -36,14 +36,14 @@
  * * 30 - Couldn't write to destination directory
  * * 40 - Something else went wrong
  */
-int dt_move_image(int id, char *pattern, const int seq, const int overwrite);
+int dt_move_image(const int id, const char *pattern, const int seq, const int overwrite);
 
 /**
  * Gets all selected images and calls dt_move_images on each.
  *
  * Returns 0 on success or the number of failures if any errors were encountered.
  */
-int dt_move_selected_images(char *pattern, const int overwrite);
+int dt_move_selected_images(const char *pattern, const int overwrite);
 
 // modelines: These editor modelines have been set for all relevant files by tools/update_modelines.sh
 // vim: shiftwidth=2 expandtab tabstop=2 cindent

@@ -26,7 +26,7 @@
 #include <sqlite3.h>
 
 
-int dt_move_selected_images(char *pattern, const int overwrite)
+int dt_move_selected_images(const char *pattern, const int overwrite)
 {
   sqlite3_stmt *stmt;
   int result = 0, seq = 1;
@@ -46,34 +46,41 @@ int dt_move_selected_images(char *pattern, const int overwrite)
   return result;
 }
 
-int dt_move_image(int id, char *pattern, const int seq, const int overwrite)
+int dt_move_image(const int id, const char *orig_pattern, const int seq, const int overwrite)
 {
   // Init variables
-  char current_image_path[PATH_MAX] = { 0 };
+  gchar *pattern = (char*)calloc(sizeof(char), strlen(orig_pattern)+1);
+  gchar current_image_path[PATH_MAX] = { 0 };
   char targ_path[PATH_MAX] = { 0 };
   dt_variables_params_t params;
   int err = 0;
 
+  // Copy pattern over into disposable variable
+  g_strlcpy(pattern, orig_pattern, strlen(orig_pattern)+1);
+
   // Replace special characters in pattern, like `~`
   gchar *fixed_path = dt_util_fix_path(pattern);
-  g_strlcpy(pattern, fixed_path, sizeof(pattern));
+  g_strlcpy(pattern, fixed_path, strlen(pattern)+1);
   g_free(fixed_path);
 
   // Get the full current path of the image
-  dt_image_full_path(id, current_image_path, sizeof(current_image_path), FALSE);
+  gboolean from_cache = FALSE;
+  dt_image_full_path(id, current_image_path, sizeof(current_image_path), &from_cache);
 
+  printf("Current path: '%s'\n", current_image_path);
+  /*
   // Now start the work (thread-safely)
 
   // Synchronize sequence number around main block
   dt_pthread_mutex_lock(&darktable.plugin_threadsafe);
   {
     // Expand variables to get target path
-    params->filename = current_image_path;
-    params->jobcode = "mv";
-    params->imgid = id;
-    params->sequence = seq;
+    params.filename = current_image_path;
+    params.jobcode = "mv";
+    params.imgid = id;
+    params.sequence = seq;
 
-    gchar *result_filename = dt_variables_expand(params, pattern, TRUE);
+    gchar *result_filename = dt_variables_expand(&params, pattern, TRUE);
     g_strlcpy(targ_path, result_filename, sizeof(targ_path));
     g_free(result_filename);
 
@@ -89,13 +96,13 @@ int dt_move_image(int id, char *pattern, const int seq, const int overwrite)
     if(g_mkdir_with_parents(output_dir, 0755))
     {
       fprintf(stderr, "[move_files] could not create directory: `%s'!\n", output_dir);
-      dt_control_log(_("could not create directory `%s'!"), output_dir);
+      //dt_control_log(_("could not create directory `%s'!"), output_dir);
       err = 10;
     }
     if(err == 0 && g_access(output_dir, W_OK | X_OK) != 0)
     {
       fprintf(stderr, "[move_files] could not write to directory: `%s'!\n", output_dir);
-      dt_control_log(_("could not write to directory `%s'!"), output_dir);
+      //dt_control_log(_("could not write to directory `%s'!"), output_dir);
       err = 30;
     }
 
@@ -111,16 +118,15 @@ int dt_move_image(int id, char *pattern, const int seq, const int overwrite)
       char *c = targ_path + strlen(targ_path);
       size_t filename_free_space = sizeof(targ_path) - (c - targ_path);
       snprintf(c, filename_free_space, ".%s", ext);
-    }
 
-    /* prevent overwrite of files */
-    if(err == 0 && !overwrite)
-    {
-      int tag = 1;
-      while(g_file_test(filename, G_FILE_TEST_EXISTS))
-      {
-        snprintf(c, filename_free_space, "_%.2d.%s", tag, ext);
-        tag++;
+      // prevent overwrite of files
+      if(!overwrite) {
+        int tag = 1;
+        while(g_file_test(targ_path, G_FILE_TEST_EXISTS))
+        {
+          snprintf(c, filename_free_space, "_%.2d.%s", tag, ext);
+          tag++;
+        }
       }
     }
   } // end of critical block; unsynchronize
@@ -130,6 +136,9 @@ int dt_move_image(int id, char *pattern, const int seq, const int overwrite)
     return err;
   }
 
+  printf("Moving image '%s' to path '%s'\n", current_image_path, targ_path);
+  */
+  /*
   // Move image file (PSEUDO-CODE... TODO: Implement for real.)
   if (!mv_file(current_image_path, targ_image_path))
   {
@@ -140,6 +149,7 @@ int dt_move_image(int id, char *pattern, const int seq, const int overwrite)
 
   printf("[move_job] moved file `%s' and accompanying sidecar files to `%s'\n", current_image_path, targ_path);
   //dt_control_log(ngettext("%d/%d  to `%s'", "%d/%d exported to `%s'", num), num, total, filename);
+  */
   return 0;
 }
 
