@@ -48,26 +48,20 @@ int dt_move_selected_images(const char *pattern, const int overwrite)
 
 int dt_move_image(const int id, const char *orig_pattern, const int seq, const int overwrite)
 {
-  // Init variables
-  gchar *pattern = (char*)calloc(sizeof(char), strlen(orig_pattern)+1);
   gchar current_image_path[PATH_MAX] = { 0 };
   char targ_path[PATH_MAX] = { 0 };
   dt_variables_params_t params;
   int err = 0;
 
-  // Copy pattern over into disposable variable
-  g_strlcpy(pattern, orig_pattern, strlen(orig_pattern)+1);
-
   // Replace special characters in pattern, like `~`
-  gchar *fixed_path = dt_util_fix_path(pattern);
-  g_strlcpy(pattern, fixed_path, strlen(pattern)+1);
-  g_free(fixed_path);
+  gchar *pattern = dt_util_fix_path(orig_pattern);
 
   // Get the full current path of the image
   gboolean from_cache = FALSE;
   dt_image_full_path(id, current_image_path, sizeof(current_image_path), &from_cache);
 
   printf("Current path: '%s'\n", current_image_path);
+  free(pattern);
   /*
   // Now start the work (thread-safely)
 
