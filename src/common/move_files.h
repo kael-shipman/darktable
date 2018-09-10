@@ -16,6 +16,8 @@
     along with darktable.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "common/variables.h"
+
 /**
  * Move (and possibly rename) one image using standard DT variable substitutions.
  *
@@ -44,6 +46,12 @@ int dt_move_image(const int id, const char *pattern, const int seq, const int ov
  * Returns 0 on success or the number of failures if any errors were encountered.
  */
 int dt_move_selected_images(const char *pattern, const int overwrite);
+
+/**
+ * Uses params (including params->filename, which is the image's original filename) to create a target path
+ * for moves, copies, and exports.
+ */
+char* dt_image_get_targ_path(dt_variables_params_t *params, const char* orig_pattern, const int overwrite);
 
 // modelines: These editor modelines have been set for all relevant files by tools/update_modelines.sh
 // vim: shiftwidth=2 expandtab tabstop=2 cindent
