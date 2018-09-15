@@ -123,6 +123,7 @@ typedef struct dt_iop_retouch_gui_data_t
   int mask_display; // should we expose masks?
   int suppress_mask;         // do not process masks
   int display_wavelet_scale; // display current wavelet scale
+  int displayed_wavelet_scale; // was display wavelet scale already used?
   int preview_auto_levels;   // should we calculate levels automatically?
   float preview_levels[3];   // values for the levels
   int first_scale_visible;   // 1st scale visible at current zoom level
@@ -1125,6 +1126,19 @@ static void rt_curr_scale_update(const int _curr_scale, dt_iop_module_t *self)
 
   rt_show_forms_for_current_scale(self);
 
+  // compute auto levels only the first time display wavelet scale is used,
+  // only if levels values are the default
+  // and a detail scale is displayed
+  dt_pthread_mutex_lock(&g->lock);
+  if(g->displayed_wavelet_scale == 0 && p->preview_levels[0] == RETOUCH_PREVIEW_LVL_MIN
+     && p->preview_levels[1] == 0.f && p->preview_levels[2] == RETOUCH_PREVIEW_LVL_MAX
+     && g->preview_auto_levels == 0 && p->curr_scale > 0 && p->curr_scale <= p->num_scales)
+  {
+    g->preview_auto_levels = 1;
+    g->displayed_wavelet_scale = 1;
+  }
+  dt_pthread_mutex_unlock(&g->lock);
+
   rt_update_wd_bar_labels(p, g);
   gtk_widget_queue_draw(g->wd_bar);
 
@@ -1843,6 +1857,8 @@ static void rt_display_wavelet_scale_callback(GtkToggleButton *togglebutton, dt_
   // if blend module is displaying mask do not display wavelet scales
   if(self->request_mask_display && !g->mask_display)
   {
+    dt_control_log(_("cannot display scales when the blending mask is displayed"));
+
     const int reset = darktable.gui->reset;
     darktable.gui->reset = 1;
     gtk_toggle_button_set_active(togglebutton, FALSE);
@@ -1857,6 +1873,19 @@ static void rt_display_wavelet_scale_callback(GtkToggleButton *togglebutton, dt_
   self->bypass_blendif = (g->mask_display || g->display_wavelet_scale);
 
   rt_show_hide_controls(self, g, p, g);
+
+  // compute auto levels only the first time display wavelet scale is used,
+  // only if levels values are the default
+  // and a detail scale is displayed
+  dt_pthread_mutex_lock(&g->lock);
+  if(g->displayed_wavelet_scale == 0 && p->preview_levels[0] == RETOUCH_PREVIEW_LVL_MIN
+     && p->preview_levels[1] == 0.f && p->preview_levels[2] == RETOUCH_PREVIEW_LVL_MAX
+     && g->preview_auto_levels == 0 && p->curr_scale > 0 && p->curr_scale <= p->num_scales)
+  {
+    g->preview_auto_levels = 1;
+    g->displayed_wavelet_scale = 1;
+  }
+  dt_pthread_mutex_unlock(&g->lock);
 
   dt_dev_reprocess_all(self->dev);
 }
@@ -2119,6 +2148,8 @@ static void rt_showmask_callback(GtkToggleButton *togglebutton, dt_iop_module_t 
   // if blend module is displaying mask do not display it here
   if(module->request_mask_display && !g->mask_display)
   {
+    dt_control_log(_("cannot display masks when the blending mask is displayed"));
+
     const int reset = darktable.gui->reset;
     darktable.gui->reset = 1;
     gtk_toggle_button_set_active(togglebutton, FALSE);
@@ -2468,6 +2499,7 @@ void gui_init(dt_iop_module_t *self)
   g->mask_display = 0;
   g->suppress_mask = 0;
   g->display_wavelet_scale = 0;
+  g->displayed_wavelet_scale = 0;
   g->first_scale_visible = RETOUCH_MAX_SCALES + 1;
 
   g->preview_auto_levels = 0;
@@ -2760,7 +2792,7 @@ void gui_init(dt_iop_module_t *self)
   g->sl_fill_brightness = dt_bauhaus_slider_new_with_range(self, -1.0, 1.0, .0005, .0, 4);
   dt_bauhaus_widget_set_label(g->sl_fill_brightness, _("brightness"), _("brightness"));
   g_object_set(g->sl_fill_brightness, "tooltip-text",
-               _("adjsts color brightness to fine tune it. works with erase as well"), (char *)NULL);
+               _("adjusts color brightness to fine-tune it. works with erase as well"), (char *)NULL);
   g_signal_connect(G_OBJECT(g->sl_fill_brightness), "value-changed", G_CALLBACK(rt_fill_brightness_callback), self);
 
   gtk_box_pack_end(GTK_BOX(g->hbox_color_pick), GTK_WIDGET(g->color_picker), FALSE, FALSE, 0);
@@ -3148,7 +3180,7 @@ void modify_roi_in(struct dt_iop_module_t *self, struct dt_dev_pixelpipe_iop_t *
 void init_key_accels(dt_iop_module_so_t *module)
 {
   dt_accel_register_iop(module, TRUE, NC_("accel", "retouch tool circle"), 0, 0);
-  dt_accel_register_iop(module, TRUE, NC_("accel", "retouch tool elipse"), 0, 0);
+  dt_accel_register_iop(module, TRUE, NC_("accel", "retouch tool ellipse"), 0, 0);
   dt_accel_register_iop(module, TRUE, NC_("accel", "retouch tool path"), 0, 0);
   dt_accel_register_iop(module, TRUE, NC_("accel", "retouch tool brush"), 0, 0);
 }
@@ -4081,6 +4113,11 @@ static void process_internal(struct dt_iop_module_t *self, dt_dev_pixelpipe_iop_
   // decompose it
   dwt_decompose(dwt_p, rt_process_forms);
 
+  float levels[3] = { 0.f };
+  levels[0] = p->preview_levels[0];
+  levels[1] = p->preview_levels[1];
+  levels[2] = p->preview_levels[2];
+
   // process auto levels
   if(g && piece->pipe->type == DT_DEV_PIXELPIPE_FULL)
   {
@@ -4091,8 +4128,7 @@ static void process_internal(struct dt_iop_module_t *self, dt_dev_pixelpipe_iop_
 
       dt_pthread_mutex_unlock(&g->lock);
 
-      float levels[3] = { 0 };
-
+      levels[0] = levels[1] = levels[2] = 0;
       rt_process_stats(in_retouch, roi_rt->width, roi_rt->height, ch, levels, use_sse);
       rt_clamp_minmax(levels, levels);
 
@@ -4113,7 +4149,7 @@ static void process_internal(struct dt_iop_module_t *self, dt_dev_pixelpipe_iop_
   // if user wants to preview a detail scale adjust levels
   if(dwt_p->return_layer > 0 && dwt_p->return_layer < dwt_p->scales + 1)
   {
-    rt_adjust_levels(in_retouch, roi_rt->width, roi_rt->height, ch, p->preview_levels, use_sse);
+    rt_adjust_levels(in_retouch, roi_rt->width, roi_rt->height, ch, levels, use_sse);
   }
 
   // copy alpha channel if nedded
@@ -4928,6 +4964,11 @@ int process_cl(struct dt_iop_module_t *self, dt_dev_pixelpipe_iop_t *piece, cl_m
   err = dwt_decompose_cl(dwt_p, rt_process_forms_cl);
   if(err != CL_SUCCESS) goto cleanup;
 
+  float levels[3] = { 0.f };
+  levels[0] = p->preview_levels[0];
+  levels[1] = p->preview_levels[1];
+  levels[2] = p->preview_levels[2];
+
   // process auto levels
   if(g && piece->pipe->type == DT_DEV_PIXELPIPE_FULL)
   {
@@ -4938,8 +4979,7 @@ int process_cl(struct dt_iop_module_t *self, dt_dev_pixelpipe_iop_t *piece, cl_m
 
       dt_pthread_mutex_unlock(&g->lock);
 
-      float levels[3] = { 0 };
-
+      levels[0] = levels[1] = levels[2] = 0;
       err = rt_process_stats_cl(devid, in_retouch, roi_rt->width, roi_rt->height, levels);
       if(err != CL_SUCCESS) goto cleanup;
 
@@ -4962,7 +5002,7 @@ int process_cl(struct dt_iop_module_t *self, dt_dev_pixelpipe_iop_t *piece, cl_m
   // if user wants to preview a detail scale adjust levels
   if(dwt_p->return_layer > 0 && dwt_p->return_layer < dwt_p->scales + 1)
   {
-    err = rt_adjust_levels_cl(devid, in_retouch, roi_rt->width, roi_rt->height, p->preview_levels);
+    err = rt_adjust_levels_cl(devid, in_retouch, roi_rt->width, roi_rt->height, levels);
     if(err != CL_SUCCESS) goto cleanup;
   }
 
