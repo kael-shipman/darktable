@@ -21,6 +21,7 @@
 #include "common/darktable.h"
 #include "common/debug.h"
 #include "common/exif.h"
+#include "common/film.h"
 #include "common/grouping.h"
 #include "common/history.h"
 #include "common/image_cache.h"
@@ -28,6 +29,7 @@
 #include "common/imageio_rawspeed.h"
 #include "common/mipmap_cache.h"
 #include "common/tags.h"
+#include "common/variables.h"
 #include "control/conf.h"
 #include "control/control.h"
 #include "control/jobs.h"
@@ -1425,6 +1427,249 @@ int32_t dt_image_copy(const int32_t imgid, const int32_t filmid)
 
   return newid;
 }
+
+
+
+int dt_image_move_selected_with_pattern(const char *pattern, const int overwrite)
+{
+  sqlite3_stmt *stmt;
+  int result = 0, seq = 1;
+
+  // Get selected images
+  DT_DEBUG_SQLITE3_PREPARE_V2(dt_database_get(darktable.db), "SELECT imgid FROM main.selected_images", -1, &stmt, NULL);
+  while(sqlite3_step(stmt) == SQLITE_ROW)
+  {
+    // Count the number of failures
+    if (dt_image_move_with_pattern(sqlite3_column_int(stmt, 0), pattern, seq, overwrite) > 0) {
+      result++;
+    }
+    seq++;
+  }
+  sqlite3_finalize(stmt);
+
+  return result;
+}
+
+
+
+
+
+
+int dt_image_move_with_pattern(const int id, const char *pattern, const int seq, const int overwrite)
+{
+  gchar src_image_path[PATH_MAX] = { 0 };
+  gchar *targ_image_path = NULL;
+  gchar src_cache_path[PATH_MAX] = { 0 };
+  gchar targ_cache_path[PATH_MAX] = { 0 };
+  dt_variables_params_t *params = NULL;
+  int err = 0;
+  int max_err = PATH_MAX*2;
+  char* err_detail = malloc(sizeof(char)*max_err);
+
+  GFile *old = NULL;
+  GFile *cold = NULL;
+  GFile *new = NULL;
+  GFile *cnew = NULL;
+
+  // Use 'do' so we can break out in case of errors
+  do {
+    // Get the full current path of the image
+    gboolean from_cache = FALSE;
+    dt_image_full_path(id, src_image_path, sizeof(src_image_path), &from_cache);
+
+    // Get the target name (thread-safely)
+
+    // Synchronize sequence number to get target path for this image
+    dt_pthread_mutex_lock(&darktable.plugin_threadsafe);
+    {
+      dt_variables_params_init(&params);
+      params->filename = src_image_path;
+      params->jobcode = "mv";
+      params->imgid = id;
+      params->sequence = seq;
+      targ_image_path = dt_image_get_path_for_pattern(params, pattern, overwrite);
+    } // end of critical block; unsynchronize
+    dt_pthread_mutex_unlock(&darktable.plugin_threadsafe);
+
+    // Create the directory hierarchy, if necessary
+    char *output_dir = g_path_get_dirname(targ_image_path);
+    if (g_mkdir_with_parents(output_dir, 0755)) {
+      //dt_control_log(_("could not create directory `%s'!"), output_dir);
+      err = 10;
+      snprintf(err_detail, sizeof(char)*max_err, "could not create directory: '%s'", output_dir);
+      break;
+    }
+    if (g_access(output_dir, W_OK | X_OK) != 0) {
+      //dt_control_log(_("could not write to directory `%s'!"), output_dir);
+      err = 20;
+      snprintf(err_detail, sizeof(char)*max_err, "could not write to directory: '%s'", output_dir);
+      break;
+    }
+
+    // Done with output dir
+    g_free(output_dir);
+
+    // Create a film roll for this directory (or get it, if it already exists)
+    dt_film_t *film = NULL;
+    dt_film_init(film);
+    if (!dt_film_new(film, output_dir)) {
+      err = 30;
+      snprintf(err_detail, sizeof(char)*max_err, "problem creating new film roll for '%s'", output_dir);
+      break;
+    }
+    printf("New film roll: %d\n", film->id);
+
+    old = g_file_new_for_path(src_image_path);
+    new = g_file_new_for_path(targ_image_path);
+    printf("About to get local cache path\n");
+    _image_local_copy_full_path(id, src_cache_path, sizeof(src_cache_path));
+    printf("About to move file.............\n");
+    if(g_file_move(old, new, G_FILE_COPY_OVERWRITE, NULL, NULL, NULL, NULL) == TRUE) {
+      printf("File moved!!\n");
+      // statement for getting ids of the image to be moved and it's duplicates
+      sqlite3_stmt *duplicates_stmt;
+      DT_DEBUG_SQLITE3_PREPARE_V2(dt_database_get(darktable.db),
+          "SELECT id FROM main.images WHERE filename IN (SELECT filename FROM main.images "
+          "WHERE id = ?1) AND film_id IN (SELECT film_id FROM main.images WHERE id = ?1)",
+          -1, &duplicates_stmt, NULL);
+
+      // first move xmp files of image and duplicates
+      GList *dup_list = NULL;
+      DT_DEBUG_SQLITE3_BIND_INT(duplicates_stmt, 1, id);
+      while(sqlite3_step(duplicates_stmt) == SQLITE_ROW) {
+        int32_t dupid = sqlite3_column_int(duplicates_stmt, 0);
+        dup_list = g_list_append(dup_list, GINT_TO_POINTER(dupid));
+        gchar oldxmp[PATH_MAX] = { 0 }, newxmp[PATH_MAX] = { 0 };
+        g_strlcpy(oldxmp, src_image_path, sizeof(oldxmp));
+        g_strlcpy(newxmp, targ_image_path, sizeof(newxmp));
+        dt_image_path_append_version(dupid, oldxmp, sizeof(oldxmp));
+        dt_image_path_append_version(dupid, newxmp, sizeof(newxmp));
+        g_strlcat(oldxmp, ".xmp", sizeof(oldxmp));
+        g_strlcat(newxmp, ".xmp", sizeof(newxmp));
+
+        GFile *goldxmp = g_file_new_for_path(oldxmp);
+        GFile *gnewxmp = g_file_new_for_path(newxmp);
+
+        // TODO: Check for errors
+        g_file_move(goldxmp, gnewxmp, G_FILE_COPY_OVERWRITE, NULL, NULL, NULL, NULL);
+
+        g_object_unref(goldxmp);
+        g_object_unref(gnewxmp);
+      }
+      sqlite3_finalize(duplicates_stmt);
+
+      // then update database and cache
+      // if update was performed in above loop, dt_image_path_append_version()
+      // would return wrong version!
+      while(dup_list) {
+        int dupid = GPOINTER_TO_INT(dup_list->data);
+        dt_image_t *img = dt_image_cache_get(darktable.image_cache, dupid, 'w');
+        img->film_id = film->id;
+        // write through to db, but not to xmp
+        dt_image_cache_write_release(darktable.image_cache, img, DT_IMAGE_CACHE_RELAXED);
+        dup_list = g_list_delete_link(dup_list, dup_list);
+      }
+      g_list_free(dup_list);
+
+      // Move cached copy, if necessary
+      if(g_file_test(src_cache_path, G_FILE_TEST_EXISTS)) {
+        // Get target name for cached copy
+        _image_local_copy_full_path(id, targ_cache_path, sizeof(targ_cache_path));
+
+        cold = g_file_new_for_path(src_cache_path);
+        cnew = g_file_new_for_path(targ_cache_path);
+
+        if(g_file_move(cold, cnew, 0, NULL, NULL, NULL, NULL) != TRUE) {
+          err = 40;
+          snprintf(err_detail, sizeof(char)*max_err, "error copying cached image '%s' to '%s'", src_cache_path, targ_cache_path);
+          break;
+        }
+      }
+    } else {
+      err = 60;
+      snprintf(err_detail, sizeof(char)*max_err, "g_file_move returned false when moving '%s' to '%s'", src_image_path, targ_image_path);
+      break;
+    }
+  } while(0);
+
+  if (old) g_object_unref(old);
+  if (new) g_object_unref(new);
+  if (cold) g_object_unref(cold);
+  if (cnew) g_object_unref(cnew);
+
+  if (err > 0) {
+    fprintf(stderr, "[dt_image_move] error moving `%s' -> `%s': %s\n", src_image_path, targ_image_path, err_detail);
+  }
+
+  free(err_detail); err_detail = NULL;
+  free(targ_image_path); targ_image_path = NULL;
+  free(params); params = NULL;
+
+  return err;
+}
+
+
+
+
+
+char* dt_image_get_path_for_pattern(dt_variables_params_t *params, const char* orig_pattern, const int overwrite)
+{
+  // Replace special characters in pattern, like `~`
+  gchar *pattern = dt_util_fix_path(orig_pattern);
+  char* targ_image_path = dt_variables_expand(params, pattern, TRUE);
+
+  // If targ_image_path results in a directory (as indicated by trailing slash), add original filename
+  char last_char = *(targ_image_path + strlen(targ_image_path) - 1);
+  if (last_char == G_DIR_SEPARATOR_S[0])
+  {
+    // Get basename
+    char* fname = g_path_get_basename(params->filename);
+
+    // Drop the extension, if necessary
+    char* ext = strrchr(fname, '.');
+    if (ext) {
+      *ext = 0;
+    }
+
+    // Merge filename onto base path
+    char* tmp_path = (char*)calloc(sizeof(char), strlen(targ_image_path)+strlen(fname)+1);
+    snprintf(tmp_path, sizeof(char)*(strlen(targ_image_path)+strlen(fname)+1), "%s%s", targ_image_path, fname);
+
+    // Free old memory and move pointer
+    free(targ_image_path); targ_image_path = NULL;
+    targ_image_path = tmp_path;
+
+    // Clean up
+    free(fname); fname = NULL;
+  }
+
+  char *ext = strrchr(params->filename, '.');
+  if (!ext) {
+    ext = "";
+  } else {
+    ext++;
+  }
+  char *targ_image_path_end = targ_image_path + strlen(targ_image_path);
+  size_t filename_free_space = sizeof(targ_image_path) - (targ_image_path_end - targ_image_path);
+  snprintf(targ_image_path_end, filename_free_space, ".%s", ext);
+
+  // prevent overwrite of files that might already be there (if desired)
+  if(!overwrite) {
+    int tag = 1;
+    while(g_file_test(targ_image_path, G_FILE_TEST_EXISTS))
+    {
+      snprintf(targ_image_path_end, filename_free_space, "_%.2d.%s", tag, ext);
+      tag++;
+    }
+  }
+  free(pattern); pattern = NULL;
+
+  return targ_image_path;
+}
+
+
+
+
 
 int dt_image_local_copy_set(const int32_t imgid)
 {

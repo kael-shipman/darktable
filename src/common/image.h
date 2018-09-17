@@ -23,6 +23,7 @@
 #endif
 
 #include "common/darktable.h"
+#include "common/variables.h"
 #include "common/dtpthread.h"
 #include "develop/format.h"
 #include <glib.h>
@@ -278,6 +279,46 @@ int32_t dt_image_move(const int32_t imgid, const int32_t filmid);
 /** physically cope image to the folder of the film roll with filmid and
  *  duplicate update database entries. */
 int32_t dt_image_copy(const int32_t imgid, const int32_t filmid);
+
+
+
+/**
+ * Move (and possibly rename) one image using standard DT variable substitutions.
+ *
+ * If pattern ends in slash (or backslash), then it is considered a directory and all image
+ * files and accompanying XMP files are moved into the resulting directory maintaining their
+ * current names. Otherwise, the whole pattern is resolved to a final filename and the image
+ * and accompanying XMP files are moved to the new name.
+ *
+ * @param int id The ID of the selected image (must be > 0)
+ * @param char* pattern The pattern used to create the destination
+ * @param const int seq The sequence number of this image (for thread safety)
+ * @param const int overwrite Whether or not to overwrite an existing file at the destination
+ *
+ * Returns 0 on success, or the following numbers on failure:
+ *
+ * * 10 - Couldn't create destination file/directory
+ * * 20 - Couldn't locate source file
+ * * 30 - Couldn't write to destination directory
+ * * 40 - Something else went wrong
+ */
+int dt_image_move_with_pattern(const int id, const char *pattern, const int seq, const int overwrite);
+
+/**
+ * Gets all selected images and calls dt_move_images on each.
+ *
+ * Returns 0 on success or the number of failures if any errors were encountered.
+ */
+int dt_image_move_selected_with_pattern(const char *pattern, const int overwrite);
+
+/**
+ * Uses params (including params->filename, which is the image's original filename) to create a target path
+ * for moves, copies, and exports.
+ */
+char* dt_image_get_path_for_pattern(dt_variables_params_t *params, const char* orig_pattern, const int overwrite);
+
+
+
 int dt_image_local_copy_set(const int32_t imgid);
 int dt_image_local_copy_reset(const int32_t imgid);
 /* check whether it is safe to remove a file */

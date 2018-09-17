@@ -10,4 +10,5 @@ tools/iop_deps.pdf
 cscope.out
 .*.swp
 .vscode/
+fixtures/test
 
